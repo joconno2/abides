@@ -1,0 +1,43 @@
+=========================================================
+ABIDES: Agent-Based Interactive Discrete Event Simulation
+=========================================================
+
+Simulation Start Time: 2025-09-26 15:56:55.064888
+Configuration seed: 2
+
+
+--- Simulation time: 2020-06-03 00:00:00, messages processed: 0, wallclock elapsed: 0 days 00:00:00 ---
+
+
+--- Simulation time: 2020-06-03 09:33:56.673339333, messages processed: 100000, wallclock elapsed: 0 days 00:00:09.241555 ---
+
+
+--- Simulation time: 2020-06-03 09:45:00.201860268, messages processed: 200000, wallclock elapsed: 0 days 00:00:20.363857 ---
+
+
+--- Simulation time: 2020-06-03 09:55:52.271678550, messages processed: 300000, wallclock elapsed: 0 days 00:00:36.232449 ---
+
+
+--- Simulation time: 2020-06-03 10:06:53.218210950, messages processed: 400000, wallclock elapsed: 0 days 00:00:57.220165 ---
+
+
+--- Simulation time: 2020-06-03 10:17:49.819097347, messages processed: 500000, wallclock elapsed: 0 days 00:01:23.170675 ---
+
+
+--- Simulation time: 2020-06-03 10:28:50.783038694, messages processed: 600000, wallclock elapsed: 0 days 00:01:55.427434 ---
+
+
+--- Simulation time: 2020-06-03 10:39:50.929443062, messages processed: 700000, wallclock elapsed: 0 days 00:02:33.280684 ---
+
+
+--- Simulation time: 2020-06-03 10:50:42.948662652, messages processed: 800000, wallclock elapsed: 0 days 00:03:20.197134 ---
+
+
+--- Simulation time: 2020-06-03 11:01:40.427148969, messages processed: 900000, wallclock elapsed: 0 days 00:04:10.747772 ---
+
+
+--- Simulation time: 2020-06-03 11:12:38.970214550, messages processed: 1000000, wallclock elapsed: 0 days 00:04:59.236967 ---
+
+
+--- Simulation time: 2020-06-03 11:23:39.916746150, messages processed: 1100000, wallclock elapsed: 0 days 00:05:50.749756 ---
+

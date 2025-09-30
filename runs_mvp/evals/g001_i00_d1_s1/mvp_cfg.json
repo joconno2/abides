@@ -1,0 +1,1 @@
+{"session_minutes": 3, "mm_params": {"spread_bps": 13.645856302404473, "quote_size": 238, "inv_aversion": 3.579480896834488, "skew_gain": 4.955218285100648, "cancel_thresh_bps": 9.017028626752206, "max_inventory": 1021}, "thin_agents": {"ValueAgent": 8, "NoiseAgent": 8, "MomentumAgent": 2}, "disable_booklog": true}

@@ -1,0 +1,3 @@
+CMD: python -u abides.py -c rmsc03_mm -t ABM -d 20200603 -s 1 -l mm_mvp_mm_g004_i01_d2_s1
+PYTHONPATH=C:\Users\joconno2\Documents\GitHub\abides;
+MM_MVP_CFG=C:\Users\joconno2\Documents\GitHub\abides\runs_mvp\evals\g004_i01_d2_s1\mvp_cfg.json

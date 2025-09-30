@@ -1,0 +1,2 @@
+2025-09-30 10:48:52
+{"session_minutes": 1, "thin_agents": {"ValueAgent": 1, "NoiseAgent": 1, "MomentumAgent": 0, "ExecutionAgent": 0}, "thinned_dropped": 5123, "mm_attrs_applied": [["min_order_size", 200]], "booklog_changes": ["exchange.book_freq", "exchange.log_orders", "exchange.log_to_file", "exchange.wide_book", "base.exchange_log_orders"], "mode": "module_level"}

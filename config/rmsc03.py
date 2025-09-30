@@ -1,372 +1,328 @@
-# RMSC-3 (Reference Market Simulation Configuration):
-# - 1     Exchange Agent
-# - 1     POV Market Maker Agent
-# - 100   Value Agents
-# - 25    Momentum Agents
-# - 5000  Noise Agents
-# - 1     (Optional) POV Execution agent
+import os, sys, json, time, importlib, types
+from datetime import timedelta
+from collections import defaultdict
 
-import argparse
-import numpy as np
-import pandas as pd
-import sys
-import datetime as dt
-from dateutil.parser import parse
+BASE_MOD_NAME = "config.rmsc03_base" 
+_base = importlib.import_module(BASE_MOD_NAME)
 
-from Kernel import Kernel
-from util import util
-from util.order import LimitOrder
-from util.oracle.SparseMeanRevertingOracle import SparseMeanRevertingOracle
+# -------------------- markers --------------------
+_cfg_path = os.environ.get("MM_MVP_CFG", "")
+try:
+    _root = os.path.dirname(_cfg_path) if _cfg_path else os.getcwd()
+    with open(os.path.join(_root, "wrapper_imported.txt"), "w", encoding="utf-8") as f:
+        f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " import reached\n")
+    print("[rmsc03_mm] module import reached", flush=True)
+except Exception as _e:
+    print(f"[rmsc03_mm] import marker failed: {_e}", file=sys.stderr, flush=True)
 
-from agent.ExchangeAgent import ExchangeAgent
-from agent.NoiseAgent import NoiseAgent
-from agent.ValueAgent import ValueAgent
-from agent.market_makers.AdaptiveMarketMakerAgent import AdaptiveMarketMakerAgent
-from agent.examples.MomentumAgent import MomentumAgent
-from agent.execution.POVExecutionAgent import POVExecutionAgent
-from model.LatencyModel import LatencyModel
+def _write_seen(summary: dict):
+    try:
+        root = os.path.dirname(_cfg_path) if _cfg_path else os.getcwd()
+        with open(os.path.join(root, "wrapper_seen.txt"), "w", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+            f.write(json.dumps(summary, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
-########################################################################################################################
-############################################### GENERAL CONFIG #########################################################
+# -------------------- fallback parse_arguments --------------------
+def _fallback_parse_arguments():
+    import argparse
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("-t","--ticker", dest="ticker", default="ABM")
+    p.add_argument("-d","--historical-date", dest="historical_date", default="20200603")
+    p.add_argument("-s","--seed", dest="seed", type=int, default=1)
+    p.add_argument("-l","--log-label", dest="log_label", default="rmsc03_mm")
+    args,_ = p.parse_known_args()
+    return args
 
-parser = argparse.ArgumentParser(description='Detailed options for RMSC03 config.')
+parse_arguments = getattr(_base, "parse_arguments", _fallback_parse_arguments)
 
-parser.add_argument('-c',
-                    '--config',
-                    required=True,
-                    help='Name of config file to execute')
-parser.add_argument('-t',
-                    '--ticker',
-                    required=True,
-                    help='Ticker (symbol) to use for simulation')
-parser.add_argument('-d', '--historical-date',
-                    required=True,
-                    type=parse,
-                    help='historical date being simulated in format YYYYMMDD.')
-parser.add_argument('--start-time',
-                    default='09:30:00',
-                    type=parse,
-                    help='Starting time of simulation.'
-                    )
-parser.add_argument('--end-time',
-                    default='11:30:00',
-                    type=parse,
-                    help='Ending time of simulation.'
-                    )
-parser.add_argument('-l',
-                    '--log_dir',
-                    default=None,
-                    help='Log directory name (default: unix timestamp at program start)')
-parser.add_argument('-s',
-                    '--seed',
-                    type=int,
-                    default=None,
-                    help='numpy.random.seed() for simulation')
-parser.add_argument('-v',
-                    '--verbose',
-                    action='store_true',
-                    help='Maximum verbosity!')
-parser.add_argument('--config_help',
-                    action='store_true',
-                    help='Print argument options for this config file')
-# Execution agent config
-parser.add_argument('-e',
-                    '--execution-agents',
-                    action='store_true',
-                    help='Flag to allow the execution agent to trade.')
-parser.add_argument('-p',
-                    '--execution-pov',
-                    type=float,
-                    default=0.1,
-                    help='Participation of Volume level for execution agent')
-# market maker config
-parser.add_argument('--mm-pov',
-                    type=float,
-                    default=0.025
-                    )
-parser.add_argument('--mm-window-size',
-                    type=util.validate_window_size,
-                    default='adaptive'
-                    )
-parser.add_argument('--mm-min-order-size',
-                    type=int,
-                    default=1
-                    )
-parser.add_argument('--mm-num-ticks',
-                    type=int,
-                    default=10
-                    )
-parser.add_argument('--mm-wake-up-freq',
-                    type=str,
-                    default='10S'
-                    )
-parser.add_argument('--mm-skew-beta',
-                    type=float,
-                    default=0
-                    )
-parser.add_argument('--mm-level-spacing',
-                    type=float,
-                    default=5
-                    )
-parser.add_argument('--mm-spread-alpha',
-                    type=float,
-                    default=0.75
-                    )
-parser.add_argument('--mm-backstop-quantity',
-                    type=float,
-                    default=50000)
+# -------------------- helpers --------------------
+def _agent_sig(a):
+    nm = getattr(a, "name", None)
+    tp = getattr(a, "type", None)
+    cls = a.__class__.__name__ if hasattr(a, "__class__") else None
+    return nm, tp, cls
 
-parser.add_argument('--fund-vol',
-                    type=float,
-                    default=1e-8,
-                    help='Volatility of fundamental time series.'
-                    )
+def _find_exchange(agents):
+    for a in agents or []:
+        cls = a.__class__.__name__
+        if "ExchangeAgent" in cls or getattr(a, "is_exchange", False):
+            return a
+    return None
 
-args, remaining_args = parser.parse_known_args()
+def _find_mm_agent(agents):
+    for a in agents or []:
+        nm, tp, cls = _agent_sig(a)
+        hay = " ".join(str(x).upper() for x in (nm, tp, cls) if x)
+        if ("MARKET" in hay and "MAKER" in hay) or ("POV" in hay):
+            return a
+    return None
 
-if args.config_help:
-    parser.print_help()
-    sys.exit()
-
-log_dir = args.log_dir  # Requested log directory.
-seed = args.seed  # Random seed specification on the command line.
-if not seed: seed = int(pd.Timestamp.now().timestamp() * 1000000) % (2 ** 32 - 1)
-np.random.seed(seed)
-
-util.silent_mode = not args.verbose
-LimitOrder.silent_mode = not args.verbose
-
-exchange_log_orders = True
-log_orders = None
-book_freq = 0
-
-simulation_start_time = dt.datetime.now()
-print("Simulation Start Time: {}".format(simulation_start_time))
-print("Configuration seed: {}\n".format(seed))
-########################################################################################################################
-############################################### AGENTS CONFIG ##########################################################
-
-# Historical date to simulate.
-historical_date = pd.to_datetime(args.historical_date)
-mkt_open = historical_date + pd.to_timedelta(args.start_time.strftime('%H:%M:%S'))
-mkt_close = historical_date + pd.to_timedelta(args.end_time.strftime('%H:%M:%S'))
-agent_count, agents, agent_types = 0, [], []
-
-# Hyperparameters
-symbol = args.ticker
-starting_cash = 10000000  # Cash in this simulator is always in CENTS.
-
-r_bar = 1e5
-sigma_n = r_bar / 10
-kappa = 1.67e-15
-lambda_a = 7e-11
-
-# Oracle
-symbols = {symbol: {'r_bar': r_bar,
-                    'kappa': 1.67e-16,
-                    'sigma_s': 0,
-                    'fund_vol': args.fund_vol,
-                    'megashock_lambda_a': 2.77778e-18,
-                    'megashock_mean': 1e3,
-                    'megashock_var': 5e4,
-                    'random_state': np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64'))}}
-
-oracle = SparseMeanRevertingOracle(mkt_open, mkt_close, symbols)
-
-# 1) Exchange Agent
-
-#  How many orders in the past to store for transacted volume computation
-# stream_history_length = int(pd.to_timedelta(args.mm_wake_up_freq).total_seconds() * 100)
-stream_history_length = 25000
-
-agents.extend([ExchangeAgent(id=0,
-                             name="EXCHANGE_AGENT",
-                             type="ExchangeAgent",
-                             mkt_open=mkt_open,
-                             mkt_close=mkt_close,
-                             symbols=[symbol],
-                             log_orders=exchange_log_orders,
-                             pipeline_delay=0,
-                             computation_delay=0,
-                             stream_history=stream_history_length,
-                             book_freq=book_freq,
-                             wide_book=True,
-                             random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64')))])
-agent_types.extend("ExchangeAgent")
-agent_count += 1
-
-# 2) Noise Agents
-num_noise = 5000
-noise_mkt_open = historical_date + pd.to_timedelta("09:00:00")  # These times needed for distribution of arrival times
-                                                                # of Noise Agents
-noise_mkt_close = historical_date + pd.to_timedelta("16:00:00")
-agents.extend([NoiseAgent(id=j,
-                          name="NoiseAgent {}".format(j),
-                          type="NoiseAgent",
-                          symbol=symbol,
-                          starting_cash=starting_cash,
-                          wakeup_time=util.get_wake_time(noise_mkt_open, noise_mkt_close),
-                          log_orders=log_orders,
-                          random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64')))
-               for j in range(agent_count, agent_count + num_noise)])
-agent_count += num_noise
-agent_types.extend(['NoiseAgent'])
-
-# 3) Value Agents
-num_value = 100
-agents.extend([ValueAgent(id=j,
-                          name="Value Agent {}".format(j),
-                          type="ValueAgent",
-                          symbol=symbol,
-                          starting_cash=starting_cash,
-                          sigma_n=sigma_n,
-                          r_bar=r_bar,
-                          kappa=kappa,
-                          lambda_a=lambda_a,
-                          log_orders=log_orders,
-                          random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64')))
-               for j in range(agent_count, agent_count + num_value)])
-agent_count += num_value
-agent_types.extend(['ValueAgent'])
-
-# 4) Market Maker Agents
-
-"""
-window_size ==  Spread of market maker (in ticks) around the mid price
-pov == Percentage of transacted volume seen in previous `mm_wake_up_freq` that
-       the market maker places at each level
-num_ticks == Number of levels to place orders in around the spread
-wake_up_freq == How often the market maker wakes up
-
-"""
-
-# each elem of mm_params is tuple (window_size, pov, num_ticks, wake_up_freq, min_order_size)
-mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size),
-             (args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size)
-             ]
-
-num_mm_agents = len(mm_params)
-mm_cancel_limit_delay = 50  # 50 nanoseconds
-
-agents.extend([AdaptiveMarketMakerAgent(id=j,
-                                name="ADAPTIVE_POV_MARKET_MAKER_AGENT_{}".format(j),
-                                type='AdaptivePOVMarketMakerAgent',
-                                symbol=symbol,
-                                starting_cash=starting_cash,
-                                pov=mm_params[idx][1],
-                                min_order_size=mm_params[idx][4],
-                                window_size=mm_params[idx][0],
-                                num_ticks=mm_params[idx][2],
-                                wake_up_freq=mm_params[idx][3],
-                                cancel_limit_delay=mm_cancel_limit_delay,
-                                skew_beta=args.mm_skew_beta,
-                                level_spacing=args.mm_level_spacing,
-                                spread_alpha=args.mm_spread_alpha,
-                                backstop_quantity=args.mm_backstop_quantity,
-                                log_orders=log_orders,
-                                random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
-                                                                                          dtype='uint64')))
-               for idx, j in enumerate(range(agent_count, agent_count + num_mm_agents))])
-agent_count += num_mm_agents
-agent_types.extend('POVMarketMakerAgent')
-
-
-# 5) Momentum Agents
-num_momentum_agents = 25
-
-agents.extend([MomentumAgent(id=j,
-                             name="MOMENTUM_AGENT_{}".format(j),
-                             type="MomentumAgent",
-                             symbol=symbol,
-                             starting_cash=starting_cash,
-                             min_size=1,
-                             max_size=10,
-                             wake_up_freq='20s',
-                             log_orders=log_orders,
-                             random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
-                                                                                       dtype='uint64')))
-               for j in range(agent_count, agent_count + num_momentum_agents)])
-agent_count += num_momentum_agents
-agent_types.extend("MomentumAgent")
-
-# 6) Execution Agent
-
-trade = True if args.execution_agents else False
-
-#### Participation of Volume Agent parameters
-
-pov_agent_start_time = mkt_open + pd.to_timedelta('00:30:00')
-pov_agent_end_time = mkt_close - pd.to_timedelta('00:30:00')
-pov_proportion_of_volume = args.execution_pov
-pov_quantity = 12e5
-pov_frequency = '1min'
-pov_direction = "BUY"
-
-pov_agent = POVExecutionAgent(id=agent_count,
-                              name='POV_EXECUTION_AGENT',
-                              type='ExecutionAgent',
-                              symbol=symbol,
-                              starting_cash=starting_cash,
-                              start_time=pov_agent_start_time,
-                              end_time=pov_agent_end_time,
-                              freq=pov_frequency,
-                              lookback_period=pov_frequency,
-                              pov=pov_proportion_of_volume,
-                              direction=pov_direction,
-                              quantity=pov_quantity,
-                              trade=trade,
-                              log_orders=True,  # needed for plots so conflicts with others
-                              random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
-                                                                                          dtype='uint64')))
-
-execution_agents = [pov_agent]
-agents.extend(execution_agents)
-agent_types.extend("ExecutionAgent")
-agent_count += 1
-
-
-########################################################################################################################
-########################################### KERNEL AND OTHER CONFIG ####################################################
-
-kernel = Kernel("RMSC03 Kernel", random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
-                                                                                                  dtype='uint64')))
-
-kernelStartTime = historical_date
-kernelStopTime = mkt_close + pd.to_timedelta('00:01:00')
-
-defaultComputationDelay = 50  # 50 nanoseconds
-
-# LATENCY
-
-latency_rstate = np.random.RandomState(seed=np.random.randint(low=0, high=2**32))
-pairwise = (agent_count, agent_count)
-
-# All agents sit on line from Seattle to NYC
-nyc_to_seattle_meters = 3866660
-pairwise_distances = util.generate_uniform_random_pairwise_dist_on_line(0.0, nyc_to_seattle_meters, agent_count,
-                                                                        random_state=latency_rstate)
-pairwise_latencies = util.meters_to_light_ns(pairwise_distances)
-
-model_args = {
-    'connected': True,
-    'min_latency': pairwise_latencies
+ATTR_CANDIDATES = {
+    "spread_bps":        ["spread_bps","spreadBps","spread","half_spread_bps"],
+    "quote_size":        ["quote_size","order_size","size","min_order_size"],
+    "inv_aversion":      ["inv_aversion","inventory_risk_aversion","risk_aversion","kappa"],
+    "skew_gain":         ["skew_gain","inventory_skew_gain","alpha","skew"],
+    "cancel_thresh_bps": ["cancel_thresh_bps","cancel_threshold_bps","cancel_thresh","cancel_threshold"],
+    "max_inventory":     ["max_inventory","inventory_limit","max_inv"],
 }
 
-latency_model = LatencyModel(latency_model='deterministic',
-                             random_state=latency_rstate,
-                             kwargs=model_args
-                             )
-# KERNEL
+def _apply_mm_params(mm_agent, mm_params):
+    applied = []
+    if mm_agent is None or not mm_params:
+        return applied
+    for key, cands in ATTR_CANDIDATES.items():
+        if key not in mm_params: 
+            continue
+        val = mm_params[key]
+        for attr in cands:
+            if hasattr(mm_agent, attr):
+                try:
+                    setattr(mm_agent, attr, val)
+                    applied.append((attr, val))
+                    break
+                except Exception:
+                    pass
+    return applied
 
-kernel.runner(agents=agents,
-              startTime=kernelStartTime,
-              stopTime=kernelStopTime,
-              agentLatencyModel=latency_model,
-              defaultComputationDelay=defaultComputationDelay,
-              oracle=oracle,
-              log_dir=args.log_dir)
+def _thin_agents_list(agents, limits):
+    if not isinstance(agents, list) or not limits:
+        return agents, 0
+    keep = set()
+    for a in agents:
+        nm, tp, cls = _agent_sig(a)
+        hay = f"{nm} {tp} {cls}".upper()
+        if "EXCHANGE" in hay or ("MARKET" in hay and "MAKER" in hay) or "POV" in hay:
+            keep.add(id(a))
+    counts = defaultdict(int)
+    out = []
+    dropped = 0
+    for a in agents:
+        if id(a) in keep:
+            out.append(a); 
+            continue
+        cls = a.__class__.__name__
+        lim = limits.get(cls)
+        if lim is None:
+            out.append(a); 
+            continue
+        if counts[cls] < max(0, int(lim)):
+            counts[cls] += 1
+            out.append(a)
+        else:
+            dropped += 1
+    return out, dropped
 
+def _disable_booklog_exchange(exchange):
+    """Flip any likely logging flags on the exchange agent."""
+    if not exchange: return []
+    changed = []
+    forced = {
+        "book_freq": 0,
+        "log_orders": False,
+        "book_log": False,
+        "write_to_disk": False,
+        "log_depth": 0,
+        "log_order_book": False,
+        "orderbook_logging": False,
+        "order_book_logging": False,
+        "log_period": 0,
+        "wide_book": False,
+        "log_to_file": False,
+    }
+    for name, val in forced.items():
+        if hasattr(exchange, name):
+            try:
+                setattr(exchange, name, val)
+                changed.append(f"exchange.{name}")
+            except Exception:
+                pass
+    # generic sweep
+    for name in dir(exchange):
+        lname = name.lower()
+        if any(tok in lname for tok in ("book","orderbook","log","depth","lob","archive","dump","csv")):
+            try:
+                cur = getattr(exchange, name)
+                if isinstance(cur, bool) and cur:
+                    setattr(exchange, name, False); changed.append(f"exchange.{name}")
+                elif isinstance(cur, int) and cur > 0:
+                    setattr(exchange, name, 0); changed.append(f"exchange.{name}")
+            except Exception:
+                pass
+    return sorted(set(changed))
 
-simulation_end_time = dt.datetime.now()
-print("Simulation End Time: {}".format(simulation_end_time))
-print("Time taken to run simulation: {}".format(simulation_end_time - simulation_start_time))
+def _disable_booklog_module(base_mod):
+    """Flip module-level toggles and monkey-patch likely archivers/loggers to no-ops."""
+    changed = []
+
+    # flip obvious module-level booleans/ints
+    for name in dir(base_mod):
+        lname = name.lower()
+        if any(tok in lname for tok in ("book","orderbook","log","archive","dump","depth","csv")):
+            try:
+                cur = getattr(base_mod, name)
+                if isinstance(cur, bool) and cur:
+                    setattr(base_mod, name, False); changed.append(f"base.{name}")
+                elif isinstance(cur, int) and cur > 0:
+                    setattr(base_mod, name, 0); changed.append(f"base.{name}")
+            except Exception:
+                pass
+
+    # monkey-patch functions that look like archivers
+    def _noop(*a, **k): 
+        return None
+
+    patch_name_tokens = (
+        "orderbook", "order_book", "booklog", "book_log", "log_order",
+        "archive", "dump", "write_book", "write_orderbook", "write_order_book",
+        "orderbook_to_csv", "log_orderbook_csv", "to_csv", "process_orderbook_log",
+    )
+    for name in dir(base_mod):
+        obj = getattr(base_mod, name, None)
+        if isinstance(obj, (types.FunctionType, types.MethodType)):
+            lname = name.lower()
+            if any(tok in lname for tok in patch_name_tokens):
+                try:
+                    setattr(base_mod, name, _noop)
+                    changed.append(f"patched.{name}()")
+                except Exception:
+                    pass
+
+    # env hint (for any code that checks it)
+    os.environ["MM_DISABLE_BOOKLOG"] = "1"
+    os.environ["ABIDES_DISABLE_BOOKLOG"] = "1"
+    return sorted(set(changed))
+
+def _load_payload():
+    if not _cfg_path:
+        return {}
+    try:
+        with open(_cfg_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[rmsc03_mm] WARNING: failed to read MM_MVP_CFG: {e}", flush=True)
+        return {}
+
+def _apply_module_level():
+    payload = _load_payload()
+    if not payload:
+        return None
+
+    summary = {
+        "session_seconds": int(payload.get("session_seconds", 0)),
+        "session_minutes": int(payload.get("session_minutes", 30)),
+        "thin_agents": payload.get("thin_agents") or {},
+        "thinned_dropped": 0,
+        "mm_attrs_applied": [],
+        "booklog_changes": [],
+        "mode": "module_level",
+    }
+
+    marketOpen  = getattr(_base, "marketOpen",  None)
+    marketClose = getattr(_base, "marketClose", None)
+    agents      = getattr(_base, "agents",      None)
+
+    # shorten session
+    try:
+        secs = int(payload.get("session_seconds", 0))
+        if marketOpen and (marketClose is not None):
+            if secs > 0:
+                marketClose = marketOpen + timedelta(seconds=secs)
+            else:
+                minutes = int(payload.get("session_minutes", 30))
+                marketClose = marketOpen + timedelta(minutes=minutes)
+            globals()["marketOpen"]  = marketOpen
+            globals()["marketClose"] = marketClose
+    except Exception:
+        pass
+
+    # thin agents
+    if isinstance(agents, list):
+        thin = payload.get("thin_agents") or {}
+        if isinstance(thin, dict):
+            thin = {str(k): int(v) for k, v in thin.items()}
+        agents2, dropped = _thin_agents_list(agents, thin)
+        globals()["agents"] = agents2
+        summary["thinned_dropped"] = dropped
+        mm_applied = _apply_mm_params(_find_mm_agent(agents2), payload.get("mm_params", {}) or {})
+        summary["mm_attrs_applied"] = mm_applied
+        summary["booklog_changes"] += _disable_booklog_exchange(_find_exchange(agents2))
+
+    # module-level booklog off + patch archivers
+    if payload.get("disable_booklog", False):
+        summary["booklog_changes"] += _disable_booklog_module(_base)
+
+    print(f"[rmsc03_mm] applied (module-level): {summary}", flush=True)
+    _write_seen(summary)
+    return summary
+
+_module_apply_summary = _apply_module_level()
+
+def _apply_to_cfg_dict(cfg: dict):
+    """Mutate a cfg dict (builder style) using the same rules."""
+    payload = _load_payload()
+    if not payload or not isinstance(cfg, dict):
+        return cfg, None
+    summary = {
+        "session_seconds": int(payload.get("session_seconds", 0)),
+        "session_minutes": int(payload.get("session_minutes", 30)),
+        "thin_agents": payload.get("thin_agents") or {},
+        "thinned_dropped": 0,
+        "mm_attrs_applied": [],
+        "booklog_changes": [],
+        "mode": "builder",
+    }
+
+    if "marketOpen" in cfg and "marketClose" in cfg:
+        try:
+            secs = int(payload.get("session_seconds", 0))
+            if secs > 0:
+                cfg["marketClose"] = cfg["marketOpen"] + timedelta(seconds=secs)
+            else:
+                cfg["marketClose"] = cfg["marketOpen"] + timedelta(minutes=summary["session_minutes"])
+        except Exception:
+            pass
+
+    if "agents" in cfg and isinstance(cfg["agents"], list):
+        thin = payload.get("thin_agents") or {}
+        if isinstance(thin, dict):
+            thin = {str(k): int(v) for k, v in thin.items()}
+        cfg["agents"], dropped = _thin_agents_list(cfg["agents"], thin)
+        summary["thinned_dropped"] = dropped
+        summary["mm_attrs_applied"] = _apply_mm_params(_find_mm_agent(cfg["agents"]), payload.get("mm_params", {}) or {})
+        summary["booklog_changes"] += _disable_booklog_exchange(_find_exchange(cfg["agents"]))
+
+    if payload.get("disable_booklog", False):
+        summary["booklog_changes"] += _disable_booklog_module(_base)
+
+    print(f"[rmsc03_mm] applied (builder): {summary}", flush=True)
+    _write_seen(summary)
+    return cfg, summary
+
+def _base_build(args):
+    for name in ("build_config","build_environment","build","build_market_environment",
+                 "rmsc03","make_config","get_config","generate_config"):
+        fn = getattr(_base, name, None)
+        if callable(fn):
+            print(f"[rmsc03_mm] using {BASE_MOD_NAME}.{name}", flush=True)
+            cfg = fn(args)
+            if isinstance(cfg, dict):
+                cfg, _ = _apply_to_cfg_dict(cfg)
+            return cfg
+    return None  
+
+def build_config(args):             return _base_build(args)
+def build_environment(args):        return _base_build(args)
+def build(args):                    return _base_build(args)
+def build_market_environment(args): return _base_build(args)
+def rmsc03(args):                   return _base_build(args)
+def make_config(args):              return _base_build(args)
+def get_config(args):               return _base_build(args)
+def generate_config(args):          return _base_build(args)
+
+# -------------------- delegation for unknown symbols --------------------
+def __getattr__(name):
+    if name in globals():
+        return globals()[name]
+    return getattr(_base, name)

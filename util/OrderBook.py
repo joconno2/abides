@@ -9,7 +9,7 @@ from util.util import log_print, be_silent
 
 from copy import deepcopy
 import pandas as pd
-from pandas.io.json import json_normalize
+from pandas import json_normalize
 from functools import reduce
 from scipy.sparse import dok_matrix
 from tqdm import tqdm
@@ -556,4 +556,5 @@ class OrderBook:
         if silent: return book
 
         log_print(book)
+
 

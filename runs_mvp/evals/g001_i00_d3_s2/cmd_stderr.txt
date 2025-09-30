@@ -1,0 +1,23 @@
+[TIMEOUT after 90s]
+=========================================================
+ABIDES: Agent-Based Interactive Discrete Event Simulation
+=========================================================
+
+Simulation Start Time: 2025-09-30 11:16:58.547791
+Configuration seed: 2
+
+
+--- Simulation time: 2020-06-03 00:00:00, messages processed: 0, wallclock elapsed: 0 days 00:00:00 ---
+
+
+--- Simulation time: 2020-06-03 09:33:56.673339333, messages processed: 100000, wallclock elapsed: 0 days 00:00:09.629939 ---
+
+
+--- Simulation time: 2020-06-03 09:45:00.201860268, messages processed: 200000, wallclock elapsed: 0 days 00:00:23.531248 ---
+
+
+--- Simulation time: 2020-06-03 09:55:52.271678550, messages processed: 300000, wallclock elapsed: 0 days 00:00:41.179545 ---
+
+
+--- Simulation time: 2020-06-03 10:06:53.218210950, messages processed: 400000, wallclock elapsed: 0 days 00:01:05.049206 ---
+

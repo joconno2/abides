@@ -1,0 +1,13 @@
+{
+  "rc": 0,
+  "runtime_s": 473.916,
+  "reason": "",
+  "stdout_bytes": 724284,
+  "stderr_bytes": 40151,
+  "has_mm_marker": 0,
+  "has_summary": 1,
+  "mm_value": -711656.0,
+  "score": -711656.0,
+  "attempt_used": "-c rmsc03",
+  "config_used": "rmsc03"
+}

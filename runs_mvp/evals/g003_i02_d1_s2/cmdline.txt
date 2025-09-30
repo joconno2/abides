@@ -1,0 +1,7 @@
+CMD: C:\Program Files\Python312\python.exe -u abides.py -c rmsc03 -t ABM -d 20200603 -s 2 -l mm_mvp_mm_g003_i02_d1_s2
+PYTHONPATH=C:\Users\joconno2\Documents\GitHub\abides;
+MM_MVP_CFG=C:\Users\joconno2\Documents\GitHub\abides\runs_mvp\evals\g003_i02_d1_s2\mvp_cfg.json
+PLATFORM=Windows-11-10.0.22621-SP0
+PY=3.12.3
+ATTEMPT=-c rmsc03
+FALLBACK_USED=-c rmsc03
