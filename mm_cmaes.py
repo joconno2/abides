@@ -1,6 +1,27 @@
-"""
-mm_cmaes.py — CMA-ES for evolving a Market Maker in ABIDES.
+# -*- coding: utf-8 -*-
+r"""
+mm_cmaes.py — CMA-ES harness for tuning a Market Maker in ABIDES.
 
+What’s new in this build
+------------------------
+1) Sends a *redundant* set of MM params (synonyms) so AdaptivePOV & other MMs
+   are more likely to accept them:
+     - size: min_order_size, order_size, quote_size
+     - risk: inventory_risk_aversion, inv_aversion
+     - skew: skew_gain, skew
+     - cancels: cancel_threshold_bps, cancel_thresh_bps
+     - inventory cap: max_inventory, inventory_limit
+     - participation: pov (derived from the first gene)
+2) Prints the parsed PnL & |inventory| per eval so you immediately see variation.
+3) Streams ABIDES output; captures partial output on timeout; writes tails.
+
+Quick smoke runs
+----------------
+$env:PYTHONPATH = "$PWD"
+python .\mm_cmaes.py --quick --timeout 180 --seconds 8
+
+If scores/PnL don’t budge across evals, your MM isn’t consuming our knobs in
+this fork. In that case we’ll switch the config to a simpler, fully tunable MM.
 """
 
 import argparse
@@ -16,127 +37,147 @@ import numpy as np
 
 try:
     import cma
-except Exception as e:
+except Exception:
     print("Please install cma: pip install cma", file=sys.stderr)
     raise
 
-# ---------- Paths ----------
+# ---------- paths ----------
 ROOT = Path(__file__).resolve().parent
 RUNS = ROOT / "runs_mvp"
 EVALS = RUNS / "evals"
 EVALS.mkdir(parents=True, exist_ok=True)
+ABIDES_PY = str((ROOT / "abides.py").resolve())
 
-ABIDES_PY = str((ROOT / "abides.py").resolve())  # ABIDES entry point
-
-# ---------- Params ----------
-# [spread_bps, quote_size, inv_aversion, skew_gain, cancel_thresh_bps, max_inventory]
+# ---------- genome & mapping ----------
+# Genome dims (we keep 6 for continuity, but map to *many* agent attrs):
+# 0: participation proxy (we map to 'pov' in [0.01, 0.50])
+# 1: size proxy        (we map to min/order/quote size)
+# 2: inv risk          (we map to inv risk aversion)
+# 3: skew gain         (we map to skew/skew_gain)
+# 4: cancel threshold  (bps)
+# 5: max inventory     (units)
 BOUNDS = np.array([
-    [  1,  50],    # spread_bps
-    [ 50, 1000],   # quote_size
-    [  0,  10],    # inv_aversion
-    [  0,  10],    # skew_gain
-    [  0,  50],    # cancel_thresh_bps
-    [100, 5000],   # max_inventory
+    [  1,   50],   # 0 → pov proxy
+    [ 50, 1000],   # 1 → size
+    [  0,   10],   # 2 → inv risk
+    [  0,   10],   # 3 → skew
+    [  0,   50],   # 4 → cancel bps
+    [100, 5000],   # 5 → max inventory
 ], dtype=float)
-
 MID = BOUNDS.mean(axis=1)
 SIGMA0 = float((BOUNDS[:,1] - BOUNDS[:,0]).mean() / 3.0)
 
-def clamp(v, lo, hi): return max(lo, min(hi, v))
+def _clamp(v, lo, hi):
+    return float(max(lo, min(hi, v)))
 
-def genome_to_mm_params(x):
+def _map_genome_to_mm_params(x):
     x = np.asarray(x, dtype=float)
-    x = np.array([clamp(v, lo, hi) for v,(lo,hi) in zip(x, BOUNDS)])
-    return {
-        "spread_bps":        int(round(x[0])),
-        "quote_size":        int(round(x[1])),
-        "inv_aversion":      float(x[2]),
-        "skew_gain":         float(x[3]),
-        "cancel_thresh_bps": int(round(x[4])),
-        "max_inventory":     int(round(x[5])),
+    x = np.array([_clamp(v, lo, hi) for v,(lo,hi) in zip(x, BOUNDS)])
+
+    # derive a participation ratio from gene 0
+    pov = _clamp(0.005 + x[0] / 100.0, 0.01, 0.50)  # 0.01–0.50
+
+    size = int(round(x[1]))
+    inv_risk = float(x[2])
+    skew = float(x[3])
+    cancel_bps = int(round(x[4]))
+    max_inv = int(round(x[5]))
+
+    # Send a broad set of synonyms so the agent accepts *something*.
+    mm = {
+        # participation
+        "pov": pov,
+        "participation_rate": pov,
+
+        # size knobs (many forks choose one of these)
+        "min_order_size": size,
+        "order_size": size,
+        "quote_size": size,
+
+        # inventory aversion / risk
+        "inventory_risk_aversion": inv_risk,
+        "inv_aversion": inv_risk,
+
+        # skew/intensity
+        "skew_gain": skew,
+        "skew": skew,
+
+        # cancel thresholds (bps)
+        "cancel_threshold_bps": cancel_bps,
+        "cancel_thresh_bps": cancel_bps,
+
+        # inventory caps
+        "max_inventory": max_inv,
+        "inventory_limit": max_inv,
     }
+    return mm
 
-# ---------- stdout parsing ----------
-# Number with optional commas/decimals:  -12,345.67  or  12345  etc.
+# ---------- parsing helpers ----------
 NUM = r"-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?"
-
-# 1) Direct summary block:
 RE_HEADER = re.compile(r"^\s*Mean ending value by agent type\s*:\s*$", re.IGNORECASE)
 RE_AGENT_LINE = re.compile(rf"^\s*(.+?)\s*:\s*({NUM})\s*$")
-
-# 2) Specific single-line shortcut (covers many forks):
 RE_PNL_INLINE = re.compile(
     rf"^\s*(?:Adaptive.*MarketMaker|ADAPTIVE[_ ]POV[_ ]MARKET[_ ]MAKER(?:[_ ]AGENT)?)\s*:\s*({NUM})\s*$",
     re.IGNORECASE
 )
-
-# 3) Fallback: per-agent holdings with marked-to-market
 RE_MM_HOLDINGS = re.compile(
     r"^Final holdings for .*MARKET.*MAKER.*\{\s*ABM:\s*(-?\d+)\b.*?Marked to market:\s*(" + NUM + r")\s*$",
     re.IGNORECASE
 )
+def _num(s): return float(str(s).replace(",", ""))
 
-def _num(s):
-    return float(str(s).replace(",", ""))
-
-def parse_pnl_from_summary(so: str):
-    """Look for the summary block and return dict {agent_type: pnl}."""
+def _parse_pnl_from_summary(so: str):
+    pnl = {}
     lines = so.splitlines()
-    pnl_dict = {}
     in_block = False
     for ln in lines:
         if not in_block:
             if RE_HEADER.search(ln):
                 in_block = True
             continue
-        # end of block if blank line or non "X: Y" line
         m = RE_AGENT_LINE.match(ln)
         if m:
             agent, val = m.group(1).strip(), _num(m.group(2))
-            pnl_dict[agent] = val
+            pnl[agent] = val
         else:
-            # likely end of block
-            if pnl_dict:
+            if pnl:
                 break
-    return pnl_dict if pnl_dict else None
+    return pnl or None
 
-def parse_pnl(so: str, mm_start_cash: float):
-    # Try the inline convenience first
+def _parse_pnl_and_inv(so: str, start_cash: float):
+    # direct shortcut
     m = RE_PNL_INLINE.search(so)
+    pnl_val = None
     if m:
-        return _num(m.group(1))
+        pnl_val = _num(m.group(1))
 
-    # Try the full summary block
-    pnl_block = parse_pnl_from_summary(so)
-    if pnl_block:
-        # find a key that looks like the MM
-        # we allow many variants:
-        for k, v in pnl_block.items():
-            key_up = k.upper().replace(" ", "_")
-            if "MARKET" in key_up and "MAKER" in key_up:
-                return float(v)
+    # summary block
+    if pnl_val is None:
+        block = _parse_pnl_from_summary(so)
+        if block:
+            for k, v in block.items():
+                ku = k.upper().replace(" ", "_")
+                if "MARKET" in ku and "MAKER" in ku:
+                    pnl_val = float(v); break
 
-    # Fallback: compute from holdings 'Marked to market'
-    # Use the first MM line we find
-    for ln in so.splitlines()[::-1]:  # scan from end (usually printed at end)
+    # fallback to holdings
+    inv_abs = None
+    for ln in so.splitlines()[::-1]:
         m2 = RE_MM_HOLDINGS.search(ln)
         if m2:
-            # inv = int(m2.group(1))  # not needed for PnL
-            m2m = _num(m2.group(2))
-            return float(m2m - mm_start_cash)
-
-    return None
-
-def parse_inventory_abs(so: str):
-    # Just for penalty: look for the last MM holdings and read ABM qty
-    for ln in so.splitlines()[::-1]:
-        m = RE_MM_HOLDINGS.search(ln)
-        if m:
             try:
-                return abs(float(m.group(1)))
+                inv_abs = abs(float(m2.group(1)))
+            except Exception:
+                inv_abs = None
+            try:
+                m2m = _num(m2.group(2))
+                if pnl_val is None:
+                    pnl_val = float(m2m - start_cash)
             except Exception:
                 pass
-    return None
+            break
+
+    return pnl_val, inv_abs
 
 # ---------- streaming runner ----------
 def _reader_thread(pipe, acc):
@@ -146,15 +187,13 @@ def _reader_thread(pipe, acc):
     except Exception:
         pass
     finally:
-        try:
-            pipe.close()
-        except Exception:
-            pass
+        try: pipe.close()
+        except Exception: pass
 
-def run_abides_streaming(label, seed, day, cfg_path: Path, timeout_s: int):
+def _run_abides(label, seed, day, cfg_path: Path, timeout_s: int):
     cmd = [
         sys.executable, "-u", ABIDES_PY,
-        "-c", "rmsc03",  # shimmed wrapper file (config/rmsc03.py)
+        "-c", "rmsc03",  # wrapper shim is expected in config/rmsc03.py
         "-t", "ABM",
         "-d", day,
         "-s", str(seed),
@@ -178,7 +217,6 @@ def run_abides_streaming(label, seed, day, cfg_path: Path, timeout_s: int):
     t_se = threading.Thread(target=_reader_thread, args=(proc.stderr, se_lines), daemon=True)
     t_so.start(); t_se.start()
 
-    # Poll with timeout
     while True:
         rc = proc.poll()
         if rc is not None:
@@ -197,7 +235,6 @@ def run_abides_streaming(label, seed, day, cfg_path: Path, timeout_s: int):
             break
         time.sleep(0.1)
 
-    # Join readers
     t_so.join(timeout=1.0)
     t_se.join(timeout=1.0)
 
@@ -209,20 +246,22 @@ def run_abides_streaming(label, seed, day, cfg_path: Path, timeout_s: int):
     return rc, dur, so, se, tag
 
 # ---------- per-eval ----------
-def write_cfg(dir_path: Path, payload: dict):
-    cfg_path = dir_path / "mvp_cfg.json"
-    with open(cfg_path, "w", encoding="utf-8") as f:
+def _write_cfg(out_dir: Path, payload: dict):
+    p = out_dir / "mvp_cfg.json"
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(payload, f)
-    return cfg_path
+    return p
 
 def _tail(text: str, n=40):
-    lines = text.splitlines()
+    lines = (text or "").splitlines()
     return "\n".join(lines[-n:]) if lines else ""
 
-def evaluate_once(genome, gen, idx, day, seed, args):
+def _evaluate_once(genome, gen, idx, day, seed, args):
     label = f"mm_mvp_mm_g{gen:03d}_i{idx:02d}_d{day[-1]}_s{seed}"
     out_dir = EVALS / f"g{gen:03d}_i{idx:02d}_d{day[-1]}_s{seed}"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    mm_params = _map_genome_to_mm_params(genome)
 
     payload = {
         "session_seconds": int(args.seconds),
@@ -234,30 +273,24 @@ def evaluate_once(genome, gen, idx, day, seed, args):
             "ExecutionAgent": args.thin_execution,
         },
         "disable_booklog": True,
-        "mm_params": genome_to_mm_params(genome),
+        "mm_params": mm_params,
     }
-    cfg_path = write_cfg(out_dir, payload)
+    cfg_path = _write_cfg(out_dir, payload)
 
     with open(out_dir / "cmdline.txt", "w", encoding="utf-8") as f:
         f.write(f"CMD: python -u abides.py -c rmsc03 -t ABM -d {day} -s {seed} -l {label}\n")
-        f.write(f"PYTHONPATH={ROOT}\n")
-        f.write(f"MM_MVP_CFG={cfg_path}\n")
+        f.write(f"PYTHONPATH={ROOT}\nMM_MVP_CFG={cfg_path}\n")
 
-    rc, dur, so, se, tag = run_abides_streaming(label, seed, day, cfg_path, timeout_s=args.timeout)
+    rc, dur, so, se, tag = _run_abides(label, seed, day, cfg_path, timeout_s=args.timeout)
 
-    # Save streams
     (out_dir / "cmd_stdout.txt").write_text(so or "", encoding="utf-8", errors="ignore")
     (out_dir / "cmd_stderr.txt").write_text(se or "", encoding="utf-8", errors="ignore")
 
-    # Wrapper marker (should be next to cfg; the shim writes there)
-    mm_marker = (out_dir / "wrapper_seen.txt").exists()
+    mm_marker = (out_dir / "wrapper_seen.txt").exists() or (ROOT / "wrapper_seen.txt").exists()
 
-    # Parse fitness
-    pnl = parse_pnl(so or "", args.mm_start_cash)
-    inv_abs = parse_inventory_abs(so or "")
-    inv_penalty = inv_abs if inv_abs is not None else 0.0
+    pnl, inv_abs = _parse_pnl_and_inv(so or "", args.mm_start_cash)
+    inv_abs = inv_abs if inv_abs is not None else 0.0
 
-    # Determine reason and score
     reason = tag
     if rc != 0 and tag != "timeout":
         reason = f"rc={rc}"
@@ -269,39 +302,43 @@ def evaluate_once(genome, gen, idx, day, seed, args):
     if (rc != 0) or (not mm_marker) or (pnl is None):
         score = -1_000_000.0
     else:
-        score = float(pnl) - args.inv_penalty * float(inv_penalty)
+        score = float(pnl) - args.inv_penalty * float(inv_abs)
 
-    so_b = len(so.encode("utf-8")) if so else 0
-    se_b = len(se.encode("utf-8")) if se else 0
-
-    tail_note = ""
+    # Helpful debug: show the parsed numbers & a short tail when failing.
     if score <= -999999.9:
-        tail = _tail(so or "", 40)
-        (out_dir / "stdout_tail.txt").write_text(tail, encoding="utf-8", errors="ignore")
+        (out_dir / "stdout_tail.txt").write_text(_tail(so, 40), encoding="utf-8", errors="ignore")
         tail_note = " tail=stdout_tail.txt"
+    else:
+        tail_note = ""
 
-    print(f"[eval g{gen:03d} i{idx:02d} d{day[-1]} s{seed}] rc={rc} dur={dur:.1f}s "
-          f"score={score:.1f} mm_marker={int(mm_marker)} stdout={so_b}B stderr={se_b}B reason={reason}{tail_note}")
+    so_b = len((so or "").encode("utf-8"))
+    se_b = len((se or "").encode("utf-8"))
+    print(
+        f"[eval g{gen:03d} i{idx:02d} d{day[-1]} s{seed}] "
+        f"rc={rc} dur={dur:.1f}s score={score:.1f} mm_marker={int(mm_marker)} "
+        f"pnl={pnl if pnl is not None else 'NA'} inv_abs={inv_abs:.0f} "
+        f"stdout={so_b}B stderr={se_b}B reason={reason}{tail_note}"
+    )
 
     return score
 
-def evaluate_mean(genome, gen, idx, args):
+def _evaluate_mean(genome, gen, idx, args):
     scores = []
     for day in args.days:
         for seed in args.seeds:
-            s = evaluate_once(genome, gen, idx, day, seed, args)
-            scores.append(s)
+            scores.append(_evaluate_once(genome, gen, idx, day, seed, args))
     return float(np.mean(scores))
 
 # ---------- CMA-ES loop ----------
 def run_cmaes(args):
     x0 = MID.copy()
     sigma0 = SIGMA0
+
     if args.quick:
         popsize = 4
         gens = 2
-        args.days  = [args.days[0]]     # 1 day
-        args.seeds = [args.seeds[0]]    # 1 seed
+        args.days = [args.days[0]]
+        args.seeds = [args.seeds[0]]
         if args.seconds <= 0:
             args.seconds = 20
     else:
@@ -314,7 +351,7 @@ def run_cmaes(args):
         X = es.ask()
         F = []
         for i, x in enumerate(X):
-            f = -evaluate_mean(x, gen, i, args)  # CMA-ES minimizes
+            f = -_evaluate_mean(x, gen, i, args)  # CMA-ES minimizes
             F.append(f)
         es.tell(X, F)
         best_idx = int(np.argmin(F))
@@ -322,7 +359,7 @@ def run_cmaes(args):
         best_score = -F[best_idx]
         print(f"[gen {gen}/{gens}] best_score={best_score:.3f} genome={np.array2string(best, precision=6)}")
 
-    print("Done. See per-eval folders under runs_mvp/evals/.")
+    print("Done. Per-eval files in runs_mvp/evals/.")
 
 # ---------- CLI ----------
 def main():
@@ -336,7 +373,7 @@ def main():
     ap.add_argument("--thin-momentum", type=int, default=0)
     ap.add_argument("--thin-execution", type=int, default=0)
     ap.add_argument("--inv-penalty", type=float, default=50.0)
-    ap.add_argument("--mm-start-cash", type=float, default=10_000_000.0, help="used for fallback PnL from M2M")
+    ap.add_argument("--mm-start-cash", type=float, default=10_000_000.0, help="fallback PnL uses this")
     ap.add_argument("--days", nargs="+", default=["20200603"])
     ap.add_argument("--seeds", nargs="+", type=int, default=[1])
     ap.add_argument("--popsize", type=int, default=16)

@@ -2,44 +2,44 @@
 ABIDES: Agent-Based Interactive Discrete Event Simulation
 =========================================================
 
-Simulation Start Time: 2025-09-30 12:00:25.616791
+Simulation Start Time: 2025-10-03 14:48:26.854026
 Configuration seed: 1
 
 
---- Simulation time: 2020-06-03 00:00:00, messages processed: 0, wallclock elapsed: 0 days 00:00:00.000976 ---
+--- Simulation time: 2020-06-03 00:00:00, messages processed: 0, wallclock elapsed: 0 days 00:00:00 ---
 
 
---- Simulation time: 2020-06-03 09:33:51.381013072, messages processed: 100000, wallclock elapsed: 0 days 00:00:12.722430 ---
+--- Simulation time: 2020-06-03 09:33:51.381013072, messages processed: 100000, wallclock elapsed: 0 days 00:00:11.417725 ---
 
 
---- Simulation time: 2020-06-03 09:45:02.471918816, messages processed: 200000, wallclock elapsed: 0 days 00:00:28.877340 ---
+--- Simulation time: 2020-06-03 09:45:02.471918816, messages processed: 200000, wallclock elapsed: 0 days 00:00:25.312250 ---
 
 
---- Simulation time: 2020-06-03 09:55:58.582207108, messages processed: 300000, wallclock elapsed: 0 days 00:00:49.484664 ---
+--- Simulation time: 2020-06-03 09:55:58.582207108, messages processed: 300000, wallclock elapsed: 0 days 00:00:44.207354 ---
 
 
---- Simulation time: 2020-06-03 10:06:44.829705686, messages processed: 400000, wallclock elapsed: 0 days 00:01:14.246197 ---
+--- Simulation time: 2020-06-03 10:06:44.829705686, messages processed: 400000, wallclock elapsed: 0 days 00:01:08.277368 ---
 
 
---- Simulation time: 2020-06-03 10:17:41.399533517, messages processed: 500000, wallclock elapsed: 0 days 00:01:45.336602 ---
+--- Simulation time: 2020-06-03 10:17:41.399533517, messages processed: 500000, wallclock elapsed: 0 days 00:01:37.402560 ---
 
 
---- Simulation time: 2020-06-03 10:28:34.889126146, messages processed: 600000, wallclock elapsed: 0 days 00:02:26.156533 ---
+--- Simulation time: 2020-06-03 10:28:34.889126146, messages processed: 600000, wallclock elapsed: 0 days 00:02:12.128120 ---
 
 
---- Simulation time: 2020-06-03 10:39:26.787269056, messages processed: 700000, wallclock elapsed: 0 days 00:03:12.274123 ---
+--- Simulation time: 2020-06-03 10:39:26.787269056, messages processed: 700000, wallclock elapsed: 0 days 00:02:51.944820 ---
 
 
---- Simulation time: 2020-06-03 10:50:22.367687532, messages processed: 800000, wallclock elapsed: 0 days 00:04:06.163810 ---
+--- Simulation time: 2020-06-03 10:50:22.367687532, messages processed: 800000, wallclock elapsed: 0 days 00:03:40.754445 ---
 
 
---- Simulation time: 2020-06-03 11:01:17.633166558, messages processed: 900000, wallclock elapsed: 0 days 00:05:03.131306 ---
+--- Simulation time: 2020-06-03 11:01:17.633166558, messages processed: 900000, wallclock elapsed: 0 days 00:04:31.338476 ---
 
 
---- Simulation time: 2020-06-03 11:12:27.821626174, messages processed: 1000000, wallclock elapsed: 0 days 00:06:00.918531 ---
+--- Simulation time: 2020-06-03 11:12:27.821626174, messages processed: 1000000, wallclock elapsed: 0 days 00:05:20.555566 ---
 
 
---- Simulation time: 2020-06-03 11:23:28.484652079, messages processed: 1100000, wallclock elapsed: 0 days 00:07:00.422169 ---
+--- Simulation time: 2020-06-03 11:23:28.484652079, messages processed: 1100000, wallclock elapsed: 0 days 00:06:12.281380 ---
 
 Final holdings for NoiseAgent 1: { ABM: -25, CASH: 12499975 }.  Marked to market: 10000000
 Final relative surplus NoiseAgent 1 0.2499975
@@ -10171,9 +10171,9 @@ Final holdings for MOMENTUM_AGENT_5127: { ABM: -606, CASH: 70234726 }.  Marked t
 Final holdings for POV_EXECUTION_AGENT: { CASH: 10000000 }.  Marked to market: 10000000
 Logging order book to file...
 Order book logging complete!
-Time taken to log the order book: 0:01:07.358172
+Time taken to log the order book: 0:01:12.960525
 Order book archival complete.
-Event Queue elapsed: 0 days 00:07:35.109613, messages: 1160466, messages per second: 2549.9
+Event Queue elapsed: 0 days 00:06:41.427896, messages: 1160466, messages per second: 2890.8
 Mean ending value by agent type:
 NoiseAgent: -94
 ValueAgent: 30134
@@ -10181,7 +10181,7 @@ AdaptivePOVMarketMakerAgent: -711656
 MomentumAgent: -47234
 ExecutionAgent: 0
 Simulation ending!
-Simulation End Time: 2025-09-30 12:09:16.242437
-Time taken to run simulation: 0:08:50.625646
+Simulation End Time: 2025-10-03 14:56:29.008052
+Time taken to run simulation: 0:08:02.154026
 [rmsc03_mm] module import reached
-[rmsc03_mm] applied (module-level): {'session_seconds': 20, 'session_minutes': 1, 'thin_agents': {'ValueAgent': 1, 'NoiseAgent': 1, 'MomentumAgent': 0, 'ExecutionAgent': 0}, 'thinned_dropped': 5123, 'mm_attrs_applied': [('min_order_size', 57)], 'booklog_changes': ['exchange.book_freq', 'exchange.log_orders', 'exchange.log_to_file', 'exchange.wide_book', 'base.exchange_log_orders'], 'mode': 'module_level'}
+[rmsc03_mm] applied (module-level): {'session_seconds': 8, 'session_minutes': 1, 'thin_agents': {'ValueAgent': 1, 'NoiseAgent': 1, 'MomentumAgent': 0, 'ExecutionAgent': 0}, 'thinned_dropped': 5123, 'mm_attrs_applied': [('min_order_size', 57)], 'booklog_changes': ['exchange.book_freq', 'exchange.log_orders', 'exchange.log_to_file', 'exchange.wide_book', 'base.exchange_log_orders'], 'mode': 'module_level'}

@@ -1,0 +1,1 @@
+{"session_seconds": 20, "session_minutes": 1, "thin_agents": {"ValueAgent": 1, "NoiseAgent": 1, "MomentumAgent": 0, "ExecutionAgent": 0}, "disable_booklog": true, "mm_params": {"spread_bps": 1, "quote_size": 696, "inv_aversion": 10.0, "skew_gain": 10.0, "cancel_thresh_bps": 50, "max_inventory": 2182}}

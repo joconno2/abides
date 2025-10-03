@@ -1,2 +1,2 @@
-2025-09-30 12:27:19
-{"session_seconds": 20, "session_minutes": 1, "thin_agents": {"ValueAgent": 1, "NoiseAgent": 1, "MomentumAgent": 0, "ExecutionAgent": 0}, "thinned_dropped": 5123, "mm_attrs_applied": [["min_order_size", 253]], "booklog_changes": ["exchange.book_freq", "exchange.log_orders", "exchange.log_to_file", "exchange.wide_book", "base.exchange_log_orders"], "mode": "module_level"}
+2025-10-03 15:12:04
+{"session_seconds": 8, "session_minutes": 1, "thin_agents": {"ValueAgent": 1, "NoiseAgent": 1, "MomentumAgent": 0, "ExecutionAgent": 0}, "thinned_dropped": 5123, "mm_attrs_applied": [["min_order_size", 253]], "booklog_changes": ["exchange.book_freq", "exchange.log_orders", "exchange.log_to_file", "exchange.wide_book", "base.exchange_log_orders"], "mode": "module_level"}
