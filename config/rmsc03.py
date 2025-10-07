@@ -60,12 +60,20 @@ def _find_mm_agent(agents):
     return None
 
 ATTR_CANDIDATES = {
-    "spread_bps":        ["spread_bps","spreadBps","spread","half_spread_bps"],
-    "quote_size":        ["quote_size","order_size","size","min_order_size"],
-    "inv_aversion":      ["inv_aversion","inventory_risk_aversion","risk_aversion","kappa"],
-    "skew_gain":         ["skew_gain","inventory_skew_gain","alpha","skew"],
-    "cancel_thresh_bps": ["cancel_thresh_bps","cancel_threshold_bps","cancel_thresh","cancel_threshold"],
-    "max_inventory":     ["max_inventory","inventory_limit","max_inv"],
+    "pov":               ["pov", "participation_rate", "mm_pov"],
+    "spread_bps":        ["spread_bps", "spreadBps", "spread", "half_spread_bps"],
+    "quote_size":        ["quote_size", "order_size", "size", "min_order_size", "mm_min_order_size"],
+    "inv_aversion":      ["inv_aversion", "inventory_risk_aversion", "risk_aversion", "kappa"],
+    "skew_gain":         ["skew_gain", "inventory_skew_gain", "alpha", "skew", "skew_beta", "mm_skew_beta"],
+    "spread_alpha":      ["spread_alpha", "mm_spread_alpha"],
+    "level_spacing":     ["level_spacing", "mm_level_spacing"],
+    "cancel_thresh_bps": ["cancel_thresh_bps", "cancel_threshold_bps", "cancel_thresh", "cancel_threshold"],
+    "cancel_delay":      ["cancel_limit_delay", "cancel_delay", "mm_cancel_limit_delay"],
+    "window_size":       ["window_size", "mm_window_size"],
+    "num_ticks":         ["num_ticks", "mm_num_ticks"],
+    "wake_up_freq":      ["wake_up_freq", "mm_wake_up_freq"],
+    "backstop_quantity": ["backstop_quantity", "mm_backstop_quantity"],
+    "max_inventory":     ["max_inventory", "inventory_limit", "max_inv", "mm_inventory_limit"],
 }
 
 def _apply_mm_params(mm_agent, mm_params):
@@ -216,6 +224,7 @@ def _apply_module_level():
         "thinned_dropped": 0,
         "mm_attrs_applied": [],
         "booklog_changes": [],
+        "lob_dataset": payload.get("lob_dataset") or {},
         "mode": "module_level",
     }
 
@@ -271,6 +280,7 @@ def _apply_to_cfg_dict(cfg: dict):
         "thinned_dropped": 0,
         "mm_attrs_applied": [],
         "booklog_changes": [],
+        "lob_dataset": payload.get("lob_dataset") or {},
         "mode": "builder",
     }
 

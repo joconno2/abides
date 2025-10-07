@@ -7,6 +7,8 @@
 # - 1     (Optional) POV Execution agent
 
 import argparse
+import json
+import os
 import numpy as np
 import pandas as pd
 import sys
@@ -17,6 +19,7 @@ from Kernel import Kernel
 from util import util
 from util.order import LimitOrder
 from util.oracle.SparseMeanRevertingOracle import SparseMeanRevertingOracle
+from util.oracle.NordicLOBOracle import NordicLOBOracle
 
 from agent.ExchangeAgent import ExchangeAgent
 from agent.NoiseAgent import NoiseAgent
@@ -171,7 +174,46 @@ symbols = {symbol: {'r_bar': r_bar,
                     'megashock_var': 5e4,
                     'random_state': np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64'))}}
 
+def _load_mm_payload():
+    cfg_path = os.environ.get("MM_MVP_CFG", "")
+    if cfg_path and os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception as exc:
+            print(f"[rmsc03_base] failed to read {cfg_path}: {exc}", file=sys.stderr)
+    return {}
+
+
+_mm_payload = _load_mm_payload()
+_lob_cfg = _mm_payload.get("lob_dataset") or {}
+
+if not _lob_cfg:
+    env_dataset = os.environ.get("NORDIC_LOB_FILE")
+    if env_dataset:
+        _lob_cfg = {"file": env_dataset}
+
 oracle = SparseMeanRevertingOracle(mkt_open, mkt_close, symbols)
+
+if _lob_cfg.get("file"):
+    try:
+        price_scale = _lob_cfg.get("scale", _lob_cfg.get("price_scale", 10000.0))
+        price_offset = _lob_cfg.get("offset", _lob_cfg.get("price_offset", 2.0))
+        enforce = _lob_cfg.get("enforce", _lob_cfg.get("enforce_monotonic", True))
+        freq = _lob_cfg.get("freq", "100ms")
+        oracle = NordicLOBOracle(
+            data_file=_lob_cfg["file"],
+            symbol=symbol,
+            mkt_open=mkt_open,
+            mkt_close=mkt_close,
+            freq=freq,
+            price_scale=price_scale,
+            price_offset=price_offset,
+            enforce_monotonic=enforce,
+        )
+        print(f"[rmsc03_base] Nordic LOB oracle active: {_lob_cfg['file']}")
+    except Exception as exc:
+        print(f"[rmsc03_base] Nordic LOB oracle fallback ({exc})", file=sys.stderr)
 
 # 1) Exchange Agent
 
@@ -370,4 +412,3 @@ kernel.runner(agents=agents,
 simulation_end_time = dt.datetime.now()
 print("Simulation End Time: {}".format(simulation_end_time))
 print("Time taken to run simulation: {}".format(simulation_end_time - simulation_start_time))
-
