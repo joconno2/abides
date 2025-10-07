@@ -18,5 +18,9 @@ cd project
 git clone https://github.com/abides-sim/abides.git
 cd abides
 pip install -r requirements.txt
+
+
+python3 mm_cmaes.py --workers 12 --max-evals 144 --lob-random
+
 ```
 

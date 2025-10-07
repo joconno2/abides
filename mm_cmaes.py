@@ -56,14 +56,14 @@ ABIDES_PY = str((ROOT / "abides.py").resolve())
 DEFAULT_LOB_FILE = ROOT / "BenchmarkDatasets/BenchmarkDatasets/NoAuction/1.NoAuction_Zscore/NoAuction_Zscore_Training/Train_Dst_NoAuction_ZScore_CF_1.txt"
 DEFAULT_LOB_DIR = DEFAULT_LOB_FILE.parent
 
-DEFAULT_SECONDS = 20
+DEFAULT_SECONDS = 40
 DEFAULT_TIMEOUT = 600
 DEFAULT_MINUTES = 1
 DEFAULT_POPSIZE = 12
 DEFAULT_GENS = 6
 DEFAULT_MAX_EVALS = DEFAULT_POPSIZE * DEFAULT_GENS
 DEFAULT_EARLY_STOP = 3
-DEFAULT_SEEDS = [1, 2]
+DEFAULT_SEEDS = [1, 2, 3, 4]
 DEFAULT_DAYS = ["20200603"]
 DEFAULT_INV_PENALTY = 5.0
 DEFAULT_DRAWDOWN_THRESHOLD = 0.05
@@ -72,7 +72,7 @@ DEFAULT_DRAWDOWN_CLIP = 1.5
 DEFAULT_START_CASH = 10_000_000.0
 DEFAULT_THIN = {
     "ValueAgent": 1,
-    "NoiseAgent": 10,
+    "NoiseAgent": 12,
     "MomentumAgent": 2,
     "ExecutionAgent": 1,
 }
@@ -91,6 +91,8 @@ BLUE = "\033[34m"
 # 3: ladder spacing proxy → level_spacing & window sizing
 # 4: smoothing proxy      → spread_alpha
 # 5: cancellation proxy   → cancel_limit_delay (ns)
+# 6: inventory/risk proxy → inventory_risk_aversion
+# 7: inventory multiplier → max inventory scaling
 BOUNDS = np.array([
     [  1,   40],   # 0 → pov proxy (0.01–0.45)
     [ 50,  800],   # 1 → size (tighter to avoid runaway inventory)
@@ -98,6 +100,8 @@ BOUNDS = np.array([
     [  2,   15],   # 3 → level spacing
     [0.10, 0.85],  # 4 → spread alpha (avoid ultraslow/ultrafast updates)
     [ 20,  250],   # 5 → cancel delay (ns)
+    [0.10,  2.0],  # 6 → inventory risk aversion
+    [1.00, 4.0],   # 7 → max inventory multiplier
 ], dtype=float)
 MID = BOUNDS.mean(axis=1)
 SIGMA0 = float((BOUNDS[:,1] - BOUNDS[:,0]).mean() / 3.0)
@@ -139,13 +143,15 @@ def _map_genome_to_mm_params(x):
     level_spacing = float(x[3])
     spread_alpha = float(x[4])
     cancel_delay = int(round(x[5]))
+    risk_aversion = float(x[6])
+    inv_multiplier = float(x[7])
 
     num_ticks = max(2, min(60, int(round(size / 40))))
     window_size = max(2, min(200, int(round(level_spacing * 8))))
     wake_freq_s = max(1, min(60, int(round(2 + (10 - min(level_spacing, 10)) * pov * 5))))
     wake_up_freq = f"{wake_freq_s}S"
     backstop_qty = int(max(size, size * min(4, pov * 20)))
-    max_inventory = int(max(backstop_qty * 2, size * 3))
+    max_inventory = int(max(backstop_qty * inv_multiplier, size * inv_multiplier * 2))
 
     # Send a broad set of synonyms so the agent accepts *something*.
     mm = {
@@ -159,6 +165,11 @@ def _map_genome_to_mm_params(x):
         "order_size": size,
         "quote_size": size,
         "mm_min_order_size": size,
+
+        # inventory aversion / risk
+        "inventory_risk_aversion": risk_aversion,
+        "inv_aversion": risk_aversion,
+        "risk_aversion": risk_aversion,
 
         # skew/intensity
         "skew_gain": skew_beta,
@@ -199,9 +210,12 @@ def _map_genome_to_mm_params(x):
         "level_spacing": level_spacing,
         "spread_alpha": spread_alpha,
         "cancel_delay": cancel_delay,
+        "risk_aversion": risk_aversion,
+        "inventory_multiplier": inv_multiplier,
         "window_size": window_size,
         "num_ticks": num_ticks,
         "wake_up_freq": wake_up_freq,
+        "max_inventory": max_inventory,
     }
     return mm, info
 
@@ -391,7 +405,8 @@ def _evaluate_once(genome, gen, idx, day, seed, args, combo_idx):
     mm_summary = (
         f"pov={mm_info['pov']:.3f} size={mm_info['size']} skew={mm_info['skew_beta']:.2f} "
         f"spacing={mm_info['level_spacing']:.2f} spread_a={mm_info['spread_alpha']:.2f} "
-        f"cancel={mm_info['cancel_delay']}ns freq={mm_info['wake_up_freq']}"
+        f"cancel={mm_info['cancel_delay']}ns risk={mm_info['risk_aversion']:.2f} "
+        f"inv_mult={mm_info['inventory_multiplier']:.2f} freq={mm_info['wake_up_freq']}"
     )
 
     pop_eff = getattr(args, "popsize_effective", args.popsize)
