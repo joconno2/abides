@@ -118,6 +118,9 @@ parser.add_argument('--mm-spread-alpha',
 parser.add_argument('--mm-backstop-quantity',
                     type=float,
                     default=50000)
+parser.add_argument('--mm-cancel-limit-delay',
+                    type=int,
+                    default=50)
 
 parser.add_argument('--fund-vol',
                     type=float,
@@ -238,7 +241,8 @@ agent_types.extend("ExchangeAgent")
 agent_count += 1
 
 # 2) Noise Agents
-num_noise = 5000
+_thin = _mm_payload.get("thin_agents", {})
+num_noise = _thin.get("NoiseAgent", 5000)
 noise_mkt_open = historical_date + pd.to_timedelta("09:00:00")  # These times needed for distribution of arrival times
                                                                 # of Noise Agents
 noise_mkt_close = historical_date + pd.to_timedelta("16:00:00")
@@ -255,7 +259,8 @@ agent_count += num_noise
 agent_types.extend(['NoiseAgent'])
 
 # 3) Value Agents
-num_value = 100
+num_value = _thin.get("ValueAgent", 100)
+num_value = max(1, num_value)
 agents.extend([ValueAgent(id=j,
                           name="Value Agent {}".format(j),
                           type="ValueAgent",
@@ -288,7 +293,7 @@ mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_
              ]
 
 num_mm_agents = len(mm_params)
-mm_cancel_limit_delay = 50  # 50 nanoseconds
+mm_cancel_limit_delay = args.mm_cancel_limit_delay
 
 agents.extend([AdaptiveMarketMakerAgent(id=j,
                                 name="ADAPTIVE_POV_MARKET_MAKER_AGENT_{}".format(j),
@@ -314,7 +319,8 @@ agent_types.extend('POVMarketMakerAgent')
 
 
 # 5) Momentum Agents
-num_momentum_agents = 25
+num_momentum_agents = _thin.get("MomentumAgent", 25)
+num_momentum_agents = max(1, num_momentum_agents)
 
 agents.extend([MomentumAgent(id=j,
                              name="MOMENTUM_AGENT_{}".format(j),
